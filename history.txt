@@ -1,15 +1,93 @@
-3.07.1: <<unreleased>>
+3.07.6: <<unreleased>>
 
+- New features:
+  - Implemented TOmniValue.LogValue.
+  - Implemented TOmniBlockingCollection.FromArray<T>, .FromRange<T>, 
+    and .AddRange<T>. [issue #76]
+  - Added timeout parameter to TOmniMREW.TryEnterReadLock and 
+    TOmniMREW.TryExitReadLock.
+- Bug fixed:
+  -  Fixed race condition in TOmniBaseBoundedQueue.RemoveLink which could cause
+     TOmniBaseBoundedQueue.Enqueue to return False when queue was empty. 
+  - ThreadData is destroyed in the worker thread and not in the thread pool
+    management thread.
+  - Reduced hints&warnings. [issue #110]
+
+3.07.5: 2017-02-28
+
+- General improvements:
+  - Reduced number of times NameThreadForDebugging is called when threadpool
+    is used.
+- Bug fixes:
+  - [VyPu] fixed race condition in TOmniCriticalSection.Release which affected
+    code that was using TOmniCriticalSection.LockCount.
+  - OtlThreadPool did not respect OTL_DontSetThreadName define.
+
+3.07.4: 2017-10-19
+
+- Bug fixes:
+  - TOmniEnumeratorProvider and TOmniValueEnumeratorProvider support
+    dmoPreserveOrder option.
+  - Fixed 64-bit issues in DSiWin32, GpLists, GpStringHash, and GpStuff.
+  
+- New features:
+  - [VyPu] Locked<T>.Value is now both readable and writable property.  
+  - Moved 'inline' functions around so that they will be inlined more often.
+
+3.07.3: 2017-08-01
+
+- Bug fixes:
+  - Nasty thread-unsafe condition fixed in DSiWin32's DSiTimeGetTime64, which is
+    used all around OmniThreadLibrary to measure small time intervals. 
+- New features:
+  - SetTimer accepts TProc and TProc<integer> timer methods.
+  - IOmniTask implements method InvokeOnSelf which can be used to schedule
+    anonymous function execution from a task back to self.  
+
+3.07.2: 2017-07-05
+
+- Potentially breaking change:
+  - Cancel(taskID) will signal task's cancellation token before calling task's Terminate
+    method. CancelAll will signal cancellation token for all running tasks before calling
+    their Terminate method.
+    Old behaviour (no CancellationToken.Signal before Terminate) can be 
+    achieved by calling overloaded version of the functions accepting the 
+    `signalCancellationToken` parameter or by setting IOmniThreadPool.Options 
+    to [tpoPreventCancellationTokenOnCancel].
+- New features:
+  - Added OnStop overload that accepts 'reference to procedure (const task: IOmniTask)'
+    to Parallel.Join and Parallel.ParallelTask.
+  - Added OnStopInvoke to all Parallel abstractions that implement OnStop method.
+    - IOmniParallelLoop<T>.OnStopInvoke and IOmniParallelMapper<T1, T2> are only
+      available on XE7 and newer compilers.
+  - Added IOmniTaskConfig.NoThreadPool. This allows high-level abstractions to
+    bypass thread pool entirely and run in 'non-pooled' threads.
+  - TOmniCS.Initialize uses global lock to synchronize initialization instead of
+    a CAS operation. This fixes all reasons for the infamous error
+    "TOmniCS.Initialize: XXX is not properly aligned!".
+ - Bug fixes:
+  - Parallel.Future did not create task with the .Unobserved qualifier.
+- New demos:
+  - 66_ThreadsInThreads: Demonstrates how to manage OTL threads from other OTL threads
+    and from TThread threads.
+
+3.07.1: 2017-05-19
+
+- New features:
+  - Supports Delphi 10.2 Tokyo.
 - Bug fixes:
   - Fixed long standing problem with timer processing in OtlTaskControl
     which could cause timers not to be triggered correctly and sometimes
     resulted in range check error.
+  - Fixed potential problem in TOTPWorker.Cancel.
+  - GParallelPool.IdleWorkerThreadTimeout_sec was incorrectly set to 60.000 seconds
+    instead of 60 seconds.
 
 3.07: 2017-02-16
 - New features:
   - Added function IOmniPipeline.NoThrottle which disables throttling 
     on an entire pipeline or one of its stages.
-  - Added function IOmniBlockingCollection.IsFinalized.
+  - Added function IOmniBlockingCollection.IsEmpty.
   - Added function IOmniBlockingCollection.Count.
   - Added readonly property IOmniThreadPool.NumCores which returns 
     number of cores this pool uses for running tasks. Changing Affinity, 

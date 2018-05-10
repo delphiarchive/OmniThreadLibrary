@@ -3,7 +3,7 @@
 ///<license>
 ///This software is distributed under the BSD license.
 ///
-///Copyright (c) 2016, Primoz Gabrijelcic
+///Copyright (c) 2017, Primoz Gabrijelcic
 ///All rights reserved.
 ///
 ///Redistribution and use in source and binary forms, with or without modification,
@@ -36,10 +36,14 @@
 ///   Contributors      : GJ, Lee_Nover
 ///
 ///   Creation date     : 2008-06-12
-///   Last modification : 2016-07-01
-///   Version           : 1.14
+///   Last modification : 2017-08-01
+///   Version           : 1.16
 ///</para><para>
 ///   History:
+///     1.16: 2017-08-01
+///       - Defined IOmniTask.InvokeOnSelf method.
+///     1.15: 2017-07-26
+///       - Defined IOmniTask.SetTimer overloads accepting TProc and TProc<integer> timer method.
 ///     1.14: 2016-07-01
 ///       - Defined IOmniTask.SetProcessorGroup and .SetNUMANode.
 ///     1.13: 2011-07-14
@@ -153,6 +157,7 @@ type
     procedure Enforced(forceExecution: boolean = true);
     {$IFDEF OTL_Anonymous}
     procedure Invoke(remoteFunc: TOmniTaskInvokeFunction); //overload;
+    procedure InvokeOnSelf(remoteFunc: TOmniTaskInvokeFunction);
 //    procedure Invoke(remoteFunc: TOmniTaskInvokeFunctionEx); overload;
     {$ENDIF OTL_Anonymous}
     procedure RegisterComm(const comm: IOmniCommunicationEndpoint);
@@ -164,6 +169,10 @@ type
     procedure SetTimer(interval_ms: cardinal); overload; deprecated {$IFDEF Unicode}'use three-parameter version'{$ENDIF Unicode};
     procedure SetTimer(interval_ms: cardinal; const timerMessage: TOmniMessageID); overload; deprecated {$IFDEF Unicode}'use three-parameter version'{$ENDIF Unicode};
     procedure SetTimer(timerID: integer; interval_ms: cardinal; const timerMessage: TOmniMessageID); overload;
+    {$IFDEF OTL_Anonymous}
+    procedure SetTimer(timerID: integer; interval_ms: cardinal; const timerMessage: TProc); overload;
+    procedure SetTimer(timerID: integer; interval_ms: cardinal; const timerMessage: TProc<integer>); overload;
+    {$ENDIF OTL_Anonymous}
     procedure StopTimer;
     procedure Terminate;
     function  Terminated: boolean;

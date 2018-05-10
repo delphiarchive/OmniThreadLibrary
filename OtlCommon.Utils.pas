@@ -1,9 +1,9 @@
-//<summary>Stuff common to the OmniThreadLibrary project.</summary>
+///<summary>Stuff common to the OmniThreadLibrary project.</summary>
 ///<author>Primoz Gabrijelcic</author>
 ///<license>
 ///This software is distributed under the BSD license.
 ///
-///Copyright (c) 2011, Primoz Gabrijelcic
+///Copyright (c) 2018, Primoz Gabrijelcic
 ///All rights reserved.
 ///
 ///Redistribution and use in source and binary forms, with or without modification,
@@ -36,11 +36,15 @@
 ///   Contributors      : GJ, Lee_Nover, scarre, Sean B. Durkin
 ///
 ///   Creation date     : 2011-08-31
-///   Last modification : 2011-08-31
-///   Version           : 1.0
+///   Last modification : 2018-02-26
+///   Version           : 1.0b
 ///</para><para>
 ///   History:
-///     1.22: 2011-08-31
+///     1.0b: 2018-02-26
+///       - Semantics of OTL_DontSetThreadName was reversed.
+///     1.0a: 2017-11-28
+///       - Did not include OtlOptions.inc
+///     1.0: 2011-08-31
 ///       - [Lee_Nover] SetThreadName implementation moved here. Disabled debug info for
 ///         the unit. That way, debugger doesn't stop on SetThreadName while 
 ///         single-stepping in another thread.
@@ -48,6 +52,7 @@
 
 unit OtlCommon.Utils;
 
+{$I OtlOptions.inc}
 {$DEBUGINFO OFF}
 
 interface
@@ -58,7 +63,7 @@ implementation
 
 {$IFDEF OTL_HasNameThreadForDebugging}
 uses
-  System.Classes;
+  Classes;
 {$ELSE ~OTL_HasNameThreadForDebugging}
 {$IFDEF MSWINDOWS}
 uses
@@ -66,11 +71,28 @@ uses
 {$ENDIF MSWINDOWS}
 {$ENDIF ~OTL_HasNameThreadForDebugging}
 
+threadvar
+  LastThreadName: string[255];
+
+{$IFDEF OTL_DontSetThreadName}
+procedure SetThreadName(const name: string);
+begin
+  // do nothing
+end; { SetThreadName }
+{$ELSE}
+
 {$IFDEF OTL_HasNameThreadForDebugging}
 
 procedure SetThreadName(const name: string);
+var
+  ansiName: AnsiString;
 begin
-  TThread.NameThreadForDebugging(name);
+  ansiName := AnsiString(name);
+  if ansiName = LastThreadName then
+    Exit;
+
+  TThread.NameThreadForDebugging(string(name));
+  LastThreadName := ansiName;
 end; { SetThreadName }
 
 {$ELSE ~OTL_HasNameThreadForDebugging}
@@ -90,6 +112,8 @@ var
 begin
   if DebugHook <> 0 then begin
     ansiName := AnsiString(name);
+    if ansiName = LastThreadName then
+      Exit;
     threadNameInfo.FType := $1000;
     threadNameInfo.FName := PAnsiChar(ansiName);
     threadNameInfo.FThreadID := $FFFFFFFF;
@@ -97,6 +121,7 @@ begin
     try
       RaiseException($406D1388, 0, SizeOf(threadNameInfo) div SizeOf(LongWord), @threadNameInfo);
     except {ignore} end;
+    LastThreadName := ansiName;
   end;
 end; { SetThreadName }
 
@@ -108,5 +133,6 @@ end; { SetThreadName }
 
 {$ENDIF ~MSWINDOWS}
 {$ENDIF ~OTL_HasNameThreadForDebugging}
+{$ENDIF ~OTL_DontSetThreadName}
 
 end.

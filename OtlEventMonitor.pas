@@ -3,7 +3,7 @@
 ///<license>
 ///This software is distributed under the BSD license.
 ///
-///Copyright (c) 2017, Primoz Gabrijelcic
+///Copyright (c) 2018, Primoz Gabrijelcic
 ///All rights reserved.
 ///
 ///Redistribution and use in source and binary forms, with or without modification,
@@ -36,10 +36,14 @@
 ///   Contributors      : GJ, Lee_Nover, Sean B. Durkin
 ///
 ///   Creation date     : 2008-06-12
-///   Last modification : 2017-01-22
-///   Version           : 1.09
+///   Last modification : 2018-03-16
+///   Version           : 1.11
 ///</para><para>
 ///   History:
+///     1.11: 2018-03-16
+///       - Unhandled exceptions in TOmniEventMonitor.WndProc are passed to OtlHooks filter.
+///     1.10: 2017-10-25
+///       - TOmniEventMonitorPool.Allocate and Release can now be called from different threads.
 ///     1.09: 2017-01-22
 ///       - ERROR_NOT_ENOUGH_QUOTA (1816) is handled in TOmniEventMonitor.WndProc.
 ///     1.08: 2015-10-04
@@ -134,6 +138,7 @@ type
     emOnTaskMessage           : TOmniMonitorTaskMessageEvent;
     emOnTaskUndeliveredMessage: TOmniMonitorTaskMessageEvent;
     emOnTaskTerminated        : TOmniMonitorTaskEvent;
+    emThreadID                : cardinal;
     {$IFDEF MSWINDOWS}
       emCurrentMsg            : TOmniMessage;
     {$ENDIF}
@@ -155,6 +160,7 @@ type
     {$IFDEF MSWINDOWS}
     property MessageWindow: THandle read emMessageWindow;
     {$ENDIF}
+    property ThreadID: cardinal read emThreadID;
     property OnPoolThreadCreated: TOmniMonitorPoolThreadEvent read emOnPoolThreadCreated
       write emOnPoolThreadCreated;
     property OnPoolThreadDestroying: TOmniMonitorPoolThreadEvent read emOnPoolThreadDestroying
@@ -195,11 +201,12 @@ var
   
 implementation
 
-{$IFDEF MSWINDOWS}
 uses
+{$IFDEF MSWINDOWS}
   Windows,
-  DSiWin32;
+  DSiWin32,
 {$ENDIF}
+  OtlHooks;
 
 const
   CMaxReceiveLoop_ms = 5;
@@ -230,6 +237,7 @@ begin
   {$ENDIF}
   emMonitoredTasks := CreateInterfaceDictionary;
   emMonitoredPools := CreateInterfaceDictionary;
+  emThreadID := {$IFDEF MSWINDOWS}GetCurrentThreadID{$ELSE}TThread.CurrentThread.ThreadID{$ENDIF};
 end; { TOmniEventMonitor.Create }
 
 destructor TOmniEventMonitor.Destroy;
@@ -309,6 +317,7 @@ var
   task         : IOmniTaskControl;
   timeStart    : int64;
   tpMonitorInfo: TOmniThreadPoolMonitorInfo;
+  wndException : Exception;
 
   function ProcessMessages(timeout_ms: integer = CMaxReceiveLoop_ms;
     rearmSelf: boolean = true): boolean;
@@ -335,58 +344,67 @@ var
   end; { ProcessMessages }
 
 begin { TOmniEventMonitor.WndProc }
-  if msg.Msg = COmniTaskMsg_NewMessage then begin
-    task := emMonitoredTasks.ValueOf(Pint64(@msg.WParam)^) as IOmniTaskControl;
-    if assigned(task) then begin
-      timeStart := GetTickCount;
-      ProcessMessages;
-    end;
-    msg.Result := 0;
-  end
-  else if msg.Msg = COmniTaskMsg_Terminated then begin
-    task := emMonitoredTasks.ValueOf(Pint64(@msg.WParam)^) as IOmniTaskControl;
-    if assigned(task) then begin
-      endpoint := (task as IOmniTaskControlSharedInfo).SharedInfo.CommChannel.Endpoint1;
-      while endpoint.Receive(emCurrentMsg) do
-        if Assigned(emOnTaskMessage) then
-          emOnTaskMessage(task, emCurrentMsg);
-      endpoint := (task as IOmniTaskControlSharedInfo).SharedInfo.CommChannel.Endpoint2;
-      while endpoint.Receive(emCurrentMsg) do
-        if Assigned(emOnTaskUndeliveredMessage) then
-          emOnTaskUndeliveredMessage(task, emCurrentMsg);
-      emCurrentMsg.MsgData._ReleaseAndClear;
-      if Assigned(emOnTaskTerminated) then
-        OnTaskTerminated(task);
-      Detach(task);
-    end;
-    msg.Result := 0;
-  end
-  else if msg.Msg = COmniPoolMsg then begin
-    tpMonitorInfo := TOmniThreadPoolMonitorInfo(msg.LParam);
-    try
-      pool := emMonitoredPools.ValueOf(tpMonitorInfo.UniqueID) as IOmniThreadPool;
-      if assigned(pool) then begin
-        if tpMonitorInfo.ThreadPoolOperation = tpoCreateThread then begin
-          if assigned(OnPoolThreadCreated) then
-            OnPoolThreadCreated(pool, tpMonitorInfo.ThreadID);
-        end
-        else if tpMonitorInfo.ThreadPoolOperation = tpoDestroyThread then begin
-          if assigned(OnPoolThreadDestroying) then
-            OnPoolThreadDestroying(pool, tpMonitorInfo.ThreadID);
-        end
-        else if tpMonitorInfo.ThreadPoolOperation = tpoKillThread then begin
-          if assigned(OnPoolThreadKilled) then
-            OnPoolThreadKilled(pool, tpMonitorInfo.ThreadID);
-        end
-        else if tpMonitorInfo.ThreadPoolOperation = tpoWorkItemCompleted then begin
-          if assigned(OnPoolWorkItemCompleted) then
-            OnPoolWorkItemCompleted(pool, tpMonitorInfo.TaskID);
-        end;
+  try
+    if msg.Msg = COmniTaskMsg_NewMessage then begin
+      task := emMonitoredTasks.ValueOf(Pint64(@msg.WParam)^) as IOmniTaskControl;
+      if assigned(task) then begin
+        timeStart := GetTickCount;
+        ProcessMessages;
       end;
-    finally FreeAndNil(tpMonitorInfo); end;
-  end
-  else
-    msg.Result := DefWindowProc(emMessageWindow, msg.Msg, msg.WParam, msg.LParam);
+      msg.Result := 0;
+    end
+    else if msg.Msg = COmniTaskMsg_Terminated then begin
+      task := emMonitoredTasks.ValueOf(Pint64(@msg.WParam)^) as IOmniTaskControl;
+      if assigned(task) then begin
+        endpoint := (task as IOmniTaskControlSharedInfo).SharedInfo.CommChannel.Endpoint1;
+        while endpoint.Receive(emCurrentMsg) do
+          if Assigned(emOnTaskMessage) then
+            emOnTaskMessage(task, emCurrentMsg);
+        endpoint := (task as IOmniTaskControlSharedInfo).SharedInfo.CommChannel.Endpoint2;
+        while endpoint.Receive(emCurrentMsg) do
+          if Assigned(emOnTaskUndeliveredMessage) then
+            emOnTaskUndeliveredMessage(task, emCurrentMsg);
+        emCurrentMsg.MsgData._ReleaseAndClear;
+        if Assigned(emOnTaskTerminated) then
+          OnTaskTerminated(task);
+        Detach(task);
+      end;
+      msg.Result := 0;
+    end
+    else if msg.Msg = COmniPoolMsg then begin
+      tpMonitorInfo := TOmniThreadPoolMonitorInfo(msg.LParam);
+      try
+        pool := emMonitoredPools.ValueOf(tpMonitorInfo.UniqueID) as IOmniThreadPool;
+        if assigned(pool) then begin
+          if tpMonitorInfo.ThreadPoolOperation = tpoCreateThread then begin
+            if assigned(OnPoolThreadCreated) then
+              OnPoolThreadCreated(pool, tpMonitorInfo.ThreadID);
+          end
+          else if tpMonitorInfo.ThreadPoolOperation = tpoDestroyThread then begin
+            if assigned(OnPoolThreadDestroying) then
+              OnPoolThreadDestroying(pool, tpMonitorInfo.ThreadID);
+          end
+          else if tpMonitorInfo.ThreadPoolOperation = tpoKillThread then begin
+            if assigned(OnPoolThreadKilled) then
+              OnPoolThreadKilled(pool, tpMonitorInfo.ThreadID);
+          end
+          else if tpMonitorInfo.ThreadPoolOperation = tpoWorkItemCompleted then begin
+            if assigned(OnPoolWorkItemCompleted) then
+              OnPoolWorkItemCompleted(pool, tpMonitorInfo.TaskID);
+          end;
+        end;
+      finally FreeAndNil(tpMonitorInfo); end;
+    end
+    else
+      msg.Result := DefWindowProc(emMessageWindow, msg.Msg, msg.WParam, msg.LParam);
+  except
+    on E: Exception do begin
+      wndException := E;
+      FilterException(wndException);
+      if assigned(wndException) then
+        raise;
+    end;
+  end;
 end; { TOmniEventMonitor.WndProc }
 {$ENDIF}
 
@@ -449,7 +467,7 @@ begin
       monitorInfo.Allocate
     else begin
       monitorInfo := TOmniCountedEventMonitor.Create(MonitorClass.Create(nil));
-      empMonitorList.AddObject(integer({$IFDEF MSWINDOWS}GetCurrentThreadID{$ELSE}TThread.CurrentThread.ThreadID{$ENDIF}), monitorInfo);
+      empMonitorList.AddObject(integer(monitorInfo.Monitor.ThreadID), monitorInfo);
     end;
     Result := monitorInfo.Monitor;
   finally empListLock.Release; end;
@@ -465,11 +483,11 @@ var
 begin
   empListLock.Acquire;
   try
-    idxMonitor := empMonitorList.IndexOf(integer({$IFDEF MSWINDOWS}GetCurrentThreadID{$ELSE}TThread.CurrentThread.ThreadID{$ENDIF}));
+    idxMonitor := empMonitorList.IndexOf(integer(monitor.ThreadID));
     if idxMonitor < 0 then
       raise Exception.CreateFmt(
         'TOmniEventMonitorPool.Release: Monitor is not allocated for thread %d',
-        [{$IFDEF MSWINDOWS}GetCurrentThreadID{$ELSE}TThread.CurrentThread.ThreadID{$ENDIF}]);
+        [monitor.ThreadID]);
     monitorInfo := TOmniCountedEventMonitor(empMonitorList.Objects[idxMonitor]);
     Assert(monitorInfo.Monitor = monitor);
     monitorInfo.Release;

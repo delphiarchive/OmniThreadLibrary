@@ -1,16 +1,16 @@
 ### What is OmniThreadLibrary?
 
-OmniThreadLibrary is a simple to use threading library for Delphi. OTL's main "selling" points (besides the prices, of course ;) are power, simplicity, and openess. With just few lines of code, you can set up multiple threads, send messages between them, process Windows messages and more. OTL doesn't limit you in any way - if it is not powerfull enough for you, you can ignore any part of its "smartness" and replace it with your own code.
+OmniThreadLibrary is a powerful threading library for Delphi. OmniThreadLibrary's main "selling" points (besides the prices, of course ;) are power, simplicity, and openess. With just few lines of code, you can set up multiple threads, send messages between them, process Windows messages and more. OmniThreadLibrary doesn't limit you in any way - if it is not powerfull enough for you, you can ignore any part of its "smartness" and replace it with your own code.
 
 ### How do I get OmniThreadLibrary?
 
-Clone the repository with Git or checkout the repository with SVN: https://github.com/gabr42/OmniThreadLibrary.git
+Clone the [latest version](https://github.com/gabr42/OmniThreadLibrary/tree/release-3.07.5) or [follow the trunk](https://github.com/gabr42/OmniThreadLibrary/). 
 
-Download the latest release (3.07): https://drive.google.com/file/d/0BwqVlLNTK4OxVlFuWDh5c1FQZDA/view?usp=sharing
+Download the [latest release](https://drive.google.com/open?id=1jmT2O7pHM_4ml5HAeAgcNgaw1r2wBbjp).
 
-Download an older release: https://drive.google.com/folderview?id=0BwqVlLNTK4OxVEgzZnZGM1FNMGc&usp=drive_web#list
+Download an [older release](https://drive.google.com/folderview?id=0BwqVlLNTK4OxVEgzZnZGM1FNMGc&usp=drive_web#list).
 
-If you have Delphi XE8 or newer, you can install OmniThreadLibrary via GetIt.
+If you have Delphi XE8 or newer, you can install OmniThreadLibrary via [GetIt](http://docwiki.embarcadero.com/RADStudio/en/GetIt).
 
 If you have Delphi XE or newer, you can install [Delphinus package manager](https://github.com/Memnarch/Delphinus/wiki/Installing-Delphinus) and install OmniThreadLibrary there. (Delphinus-Support)
 
@@ -21,7 +21,7 @@ Download and install the sources. Compile and install the OmniThreadLibrary pack
 ### Is OmniThreadLibrary supported on my platform?
 
 At the moment, OTL supports Delphi 2007, 2009, 2010, XE, XE2, XE3, XE4, XE5, 
-XE6, XE7, XE8, 10 Seattle, and 10.1 Berlin on Win32 and Win64 platforms using the VCL framework. 
+XE6, XE7, XE8, 10 Seattle, 10.1 Berlin, and 10.2 Tokyo on Win32 and Win64 platforms using the VCL framework. 
 
 There are no plans to support older Delphi compilers. 
 We are working on support for mobile devices, OS X, and FireMonkey.
@@ -32,8 +32,4 @@ Support is provided through the [Google+ community](https://plus.google.com/comm
 
 ### Where can I get more information?
 
-There's a book (work in progress): [Parallel Programming with OmniThreadLibrary](https://leanpub.com/omnithreadlibrary).
-
-Some recorder webinars are available: http://www.omnithreadlibrary.com/webinars.htm
-
-Lots of articles are available on my blog: http://www.omnithreadlibrary.com/tutorials.htm
+Go to [www.omnithreadlibrary.com](http://www.omnithreadlibrary.com).

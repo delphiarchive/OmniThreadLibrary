@@ -4,7 +4,7 @@
 ///<license>
 ///This software is distributed under the BSD license.
 ///
-///Copyright (c) 2015, Primoz Gabrijelcic
+///Copyright (c) 2017, Primoz Gabrijelcic
 ///All rights reserved.
 ///
 ///Redistribution and use in source and binary forms, with or without modification,
@@ -34,12 +34,22 @@
 ///   Author            : Primoz Gabrijelcic
 ///     E-Mail          : primoz@gabrijelcic.org
 ///     Blog            : http://thedelphigeek.com
-///   Contributors      : GJ, Lee_Nover, dottor_jeckill, Sean B. Durkin
+///   Contributors      : GJ, Lee_Nover, dottor_jeckill, Sean B. Durkin, VyPu
 ///   Creation date     : 2009-03-30
-///   Last modification : 2016-10-24
-///   Version           : 1.23
+///   Last modification : 2018-04-06
+///   Version           : 1.27
 ///</para><para>
 ///   History:
+///	    1.27: 2018-04-06
+///	      - Added timeout parameter to TOmniMREW.TryEnterReadLock and TOmniMREW.TryExitReadLock.
+///     1.26: 2017-11-09
+///       - [VyPu] Fixed: TOmniCriticalSection.Release decremented ocsLockCount after releasing the critical section.
+///     1.25: 2017-09-28
+///       - [VyPu] Locked<T>.Value is now both readable and writable property.
+///     1.24: 2017-06-14
+///       - TOmniCS.Initialize uses global lock to synchronize initialization instead of
+///         a CAS operation. This fixes all reasons for the infamous error
+///         "TOmniCS.Initialize: XXX is not properly aligned!".
 ///     1.23: 2016-10-24
 ///       - Implemented two-parameter version of Atomic initializer which intializes
 ///         an interface type from a class type.
@@ -282,8 +292,8 @@ type
     procedure EnterWriteLock; inline;
     procedure ExitReadLock; inline;
     procedure ExitWriteLock; inline;
-    function  TryEnterReadLock: boolean; inline;
-    function  TryEnterWriteLock: boolean; inline;
+    function  TryEnterReadLock(timeout_ms: integer = 0): boolean;
+    function  TryEnterWriteLock(timeout_ms: integer = 0): boolean;
   end; { TOmniMREW }
 
   IOmniResourceCount = interface({$IFDEF MSWINDOWS}
@@ -375,6 +385,7 @@ type
     FOwnsObject : boolean;
     procedure Clear; inline;
     function  GetValue: T; inline;
+    procedure SetValue(const value: T); inline;
   public
     type TFactory = reference to function: T;
     type TProcT = reference to procedure(const value: T);
@@ -390,7 +401,7 @@ type
     procedure Locked(proc: TProcT); overload; inline;
     procedure Release; inline;
     procedure Free; inline;
-    property Value: T read GetValue;
+    property Value: T read GetValue write SetValue;
   end; { Locked<T> }
 
   IOmniLockManagerAutoUnlock = interface
@@ -798,6 +809,9 @@ type
   {$ENDIF ~MSWINDOWS}
   {$ENDIF OTL_MobileSupport}
 
+var
+  GOmniCSInitializer: TOmniCriticalSection;
+
 { transitional }
 
 function SetEvent(event: TOmniTransitionEvent): boolean;
@@ -1105,19 +1119,13 @@ begin
 end; { TOmniCS.GetSyncObj }
 
 procedure TOmniCS.Initialize;
-var
-  syncIntf: IOmniCriticalSection;
 begin
-  Assert(NativeUInt(@ocsSync) mod SizeOf(pointer) = 0, 'TOmniCS.Initialize: ocsSync is not properly aligned!');
-  Assert(NativeUInt(@syncIntf) mod SizeOf(pointer) = 0, 'TOmniCS.Initialize: syncIntf is not properly aligned!');
   if not assigned(ocsSync) then begin
-    syncIntf := CreateOmniCriticalSection;
-    {$IFDEF MSWINDOWS}
-    if CAS(nil, pointer(syncIntf), ocsSync) then
-    {$ELSE}
-    if TInterlocked.CompareExchange(pointer(ocsSync), pointer(syncIntf), nil) = nil then
-    {$ENDIF}
-      pointer(syncIntf) := nil;
+    GOmniCSInitializer.Acquire;
+    try
+      if not assigned(ocsSync) then
+        ocsSync := CreateOmniCriticalSection;
+    finally GOmniCSInitializer.Release; end;
   end;
 end; { TOmniCS.Initialize }
 
@@ -1130,12 +1138,14 @@ end; { TOmniCS.Release }
 
 constructor TOmniCriticalSection.Create;
 begin
+  inherited Create;
   ocsCritSect := TFixedCriticalSection.Create;
 end; { TOmniCriticalSection.Create }
 
 destructor TOmniCriticalSection.Destroy;
 begin
   FreeAndNil(ocsCritSect);
+  inherited;
 end; { TOmniCriticalSection.Destroy }
 
 procedure TOmniCriticalSection.Acquire;
@@ -1156,8 +1166,8 @@ end; { TOmniCriticalSection.GetSyncObj }
 
 procedure TOmniCriticalSection.Release;
 begin
-  ocsCritSect.Release;
   Dec(ocsLockCount);
+  ocsCritSect.Release;
 end; { TOmniCriticalSection.Release }
 
 { TOmniCancellationToken }
@@ -1268,34 +1278,62 @@ begin
   NativeInt(omrewReference) := 0;
 end; { TOmniMREW.ExitWriteLock }
 
-function TOmniMREW.TryEnterReadLock: boolean;
+function TOmniMREW.TryEnterReadLock(timeout_ms: integer): boolean;
 var
   currentReference: NativeInt;
+  startWait_ms: int64;
+
+  function Timeout(var returnFalse: boolean): boolean;
+  begin
+    Result := (timeout_ms <= 0) or DSiHasElapsed64(startWait_ms, timeout_ms);
+    if Result then
+      returnFalse := true;
+  end; { Timeout }
+
 begin
+  Result := true;
+  startWait_ms := DSiTimeGetTime64; //TODO: Rewrite this with a faster, non-locking clock
   //Wait on writer to reset write flag so Reference.Bit0 must be 0 than increase Reference
-  currentReference := NativeInt(omrewReference) AND NOT 1;
+  repeat
+    currentReference := NativeInt(omrewReference) AND NOT 1;
   {$IFDEF MSWINDOWS}
-  Result := CAS(currentReference, currentReference + 2, NativeInt(omrewReference));
+  until CAS(currentReference, currentReference + 2, NativeInt(omrewReference)) or Timeout(Result);
   {$ELSE}
-  Result := TInterlockedEx.CompareExchange(NativeInt(omrewReference), currentReference + 2, currentReference) = currentReference;
+  until (TInterlockedEx.CompareExchange(NativeInt(omrewReference), currentReference + 2, currentReference) = currentReference) or Timeout(Result);
   {$ENDIF}
 end; { TOmniMREW.TryEnterReadLock }
 
-function TOmniMREW.TryEnterWriteLock: boolean;
+function TOmniMREW.TryEnterWriteLock(timeout_ms: integer): boolean;
 var
   currentReference: NativeInt;
+  startWait_ms: int64;
+
+  function Timeout(var returnFalse: boolean): boolean;
+  begin
+    Result := (timeout_ms <= 0) or DSiHasElapsed64(startWait_ms, timeout_ms);
+    if Result then
+      returnFalse := true;
+  end; { Timeout }
+
 begin
+  Result := true;
+  startWait_ms := DSiTimeGetTime64; //TODO: Rewrite this with a faster, non-locking clock
+
   //Wait on writer to reset write flag so omrewReference.Bit0 must be 0 then set omrewReference.Bit0
-  currentReference := NativeInt(omrewReference) AND NOT 1;
+  repeat
+    currentReference := NativeInt(omrewReference) AND NOT 1;
   {$IFDEF MSWINDOWS}
-  Result := CAS(currentReference, currentReference + 1, NativeInt(omrewReference));
+  until CAS(currentReference, currentReference + 1, NativeInt(omrewReference)) or Timeout(Result);
   {$ELSE}
-  Result := TInterlockedEx.CompareExchange(NativeInt(omrewReference), currentReference + 1, currentReference) = currentReference;
+  until (TInterlockedEx.CompareExchange(NativeInt(omrewReference), currentReference + 1, currentReference) = currentReference) or Timeout(Result);
   {$ENDIF}
-  if Result then
+  if Result then begin
     //Now wait on all readers
     repeat
-    until NativeInt(omrewReference) = 1;
+    until (NativeInt(omrewReference) = 1) or Timeout(Result);
+    if not Result then
+      ExitWriteLock;
+  end;
 end; { TOmniMREW.TryEnterWriteLock }
 
 {$IFDEF MSWINDOWS}
@@ -1355,7 +1393,7 @@ var
   waitTime_ms : int64;
 begin
   Result := false;
-  startTime_ms := DSiTimeGetTime64;
+  startTime_ms := DSiTimeGetTime64; //TODO: Rewrite this with a faster, non-locking clock
   orcLock.Acquire;
   repeat
     if orcNumResources.Value = 0 then begin
@@ -1558,6 +1596,12 @@ begin
   Result := FValue;
 end; { Locked<T>.GetValue }
 
+procedure Locked<T>.SetValue(const value: T);
+begin
+  Assert(FLock.LockCount > 0, 'Locked<T>.SetValue: Not locked');
+  FValue := value;
+end; { Locked<T>.SetValue }
+
 function Locked<T>.Initialize(factory: TFactory): T;
 begin
   if not FInitialized then begin
@@ -1717,7 +1761,7 @@ var
 begin
   Result := false;
   waitEvent := 0;
-  startWait := DSiTimeGetTime64;
+  startWait := DSiTimeGetTime64; //TODO: Rewrite this with a faster, non-locking clock
 
   repeat
     FLock.Acquire;
@@ -1928,9 +1972,11 @@ begin
     idxWait := FWaitHandles.AddObject(0 {placeholder}, waiter);
     if iHandle <> idxWait then
       raise Exception.Create('TWaitFor.RegisterWaitHandles: Indexes out of sync');
+{$WARN SYMBOL_PLATFORM OFF}
     Win32Check(RegisterWaitForSingleObject(newWaitObject, FHandles[iHandle], WaitForCallback,
                                            pointer(waiter), INFINITE,
                                            extraFlags OR WT_EXECUTEINPERSISTENTTHREAD));
+{$WARN SYMBOL_PLATFORM ON}
     FWaitHandles[idxWait] := newWaitObject;
   end;
   SetLength(FSignalledHandles, 0);
@@ -2621,9 +2667,12 @@ end; { TInterlockedEx.Increment }
 
 initialization
   GOmniCancellationToken := CreateOmniCancellationToken;
+  GOmniCSInitializer := TOmniCriticalSection.Create;
   {$IFDEF CPUX64}
   CASAlignment := 16;
   {$ELSE}
   CASAlignment := 8;
   {$ENDIF CPUX64}
+finalization
+  FreeAndNil(GOmniCSInitializer);
 end.
